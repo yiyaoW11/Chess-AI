@@ -1,6 +1,6 @@
 Note: This is an ongoing project, and as my first AI/deep learning project, there may be areas for improvement.
 
----- Overview 
+## 🚀Overview 
 This repository contains a Chess AI capable of evaluating positions and playing games using various algorithms. The AI improves its 
 performance over time by learning from historical game data and Stockfish evaluations. A neural network is trained to predict evaluation 
 scores based on extracted game features.

@@ -1,15 +1,29 @@
 import game
 import chess
+import tensorflow as tf
 from tensorflow.keras.models import load_model
 import numpy as np
 
+evaluation_model = load_model("chess_evaluation_model.h5")
+
+@tf.function
+def fast_eval(x):
+    return evaluation_model(x, training=False)
+
 def evaluate_board_with_nn(board):
     features = game.extract_features(board.fen())
-    features = np.array(features).reshape(1, -1)
-
-    # Predict the evaluation score using the trained model
-    evaluation = evaluation_model.predict(features, verbose=0)[0][0]
+    features = np.array(features, dtype=np.float32).reshape(1, -1)
+    
+    # CHANGED: use fast_eval instead of .predict()
+    evaluation = fast_eval(features).numpy()[0][0]
     return evaluation
+
+    # features = game.extract_features(board.fen())
+    # features = np.array(features).reshape(1, -1)
+
+    # # Predict the evaluation score using the trained model
+    # evaluation = evaluation_model.predict(features, verbose=0)[0][0]
+    # return evaluation
 
 # Returns the best score along with the best move
 def minimax(board, depth, alpha, beta, maximisingPlayer):

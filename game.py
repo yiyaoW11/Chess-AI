@@ -15,9 +15,14 @@ from tensorflow.keras.layers import Dense, Dropout
 
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
-chess_data = pd.read_csv("game_data.csv")
 stockfish_path = "stockfish/stockfish.exe"
-engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+_engine = None
+
+def get_engine():
+    global _engine
+    if _engine is None:
+        _engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+    return _engine
 
 # Convert data from csv into chess pgn format
 def create_pgn_game(moves):
@@ -40,6 +45,7 @@ def extract_game_info(game, outcome):
     return positions, evaluations, results
 
 def get_stockfish_eval(board):
+    engine = get_engine()
     analysis = engine.analyse(board, chess.engine.Limit(depth=10))
     return analysis["score"].relative.score(mate_score=5000)
 
@@ -120,7 +126,8 @@ def train_evaluations():
     model.save("chess_evaluation_model.h5")
 
     # Quitting stockfish
-    engine.quit()
+    if _engine is not None:
+        _engine.quit()
 
 if __name__ == "__main__":
     train_evaluations()

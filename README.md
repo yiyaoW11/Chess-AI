@@ -8,7 +8,7 @@ A chess engine in Python that searches with alpha-beta minimax and supports two 
 |---|---|---|
 | NN evaluation MAE | 290 cp | **82 cp** |
 | NN evaluation MSE | 84,306 | **18,646** |
-| NN vs Classical (10 games, 1s/move) | — | 5-5 (50%) |
+| NN vs Classical (10 games, 1s/move) | 0-10 (0%) | 5-5 (50%) |
 | Training data | 100 games, 5 features | 5,000 games, 29 features |
 
 After improving the training pipeline, the NN's evaluation error dropped ~3.5× on MAE and ~4.5× on MSE. In head-to-head play, the two evaluators draw at equal time control — the NN learned chess evaluation from scratch but doesn't yet outperform a well-tuned classical baseline.

@@ -1,26 +1,17 @@
 import game
 import chess
-# import tensorflow as tf
-# from tensorflow.keras.models import load_model
 import numpy as np
 import helpers
+import time
+import chess.polyglot
 
-# evaluation_model = load_model("chess_evaluation_model.h5")
+transposition_table = {}
 
-# @tf.function
-# def fast_eval(x):
-#     return evaluation_model(x, training=False)
+class TimeoutError(Exception):
+    pass
 
 def evaluate_board_with_classical(board):
     return helpers.evaluate_board_classical(board)
-
-# def evaluate_board_with_nn(board):
-#     features = game.extract_features(board.fen())
-#     features = np.array(features, dtype=np.float32).reshape(1, -1)
-    
-#     # CHANGED: use fast_eval instead of .predict()
-#     evaluation = fast_eval(features).numpy()[0][0]
-#     return evaluation
 
 def quiescence(board, alpha, beta, maximisingPlayer):
     """Search only captures until the position is 'quiet'."""
@@ -63,6 +54,82 @@ def quiescence(board, alpha, beta, maximisingPlayer):
                 beta = score
         return beta
 
+def minimax_with_timeout(board, depth, alpha, beta, maximisingPlayer, start_time, time_limit):
+    # Check timer first
+    if time.time() - start_time > time_limit:
+        raise TimeoutError()
+    
+    if board.is_game_over():
+        return evaluate_board_with_classical(board), None
+    if depth == 0:
+        return quiescence(board, alpha, beta, maximisingPlayer), None
+    
+    key = chess.polyglot.zobrist_hash(board)
+    if key in transposition_table:
+        cached_depth, cached_score, cached_move = transposition_table[key]
+        if cached_depth >= depth:
+            return cached_score, cached_move
+    
+    if maximisingPlayer:
+        curr_max = float('-inf')
+        best_move = None
+        for move in order_moves(board):
+            board.push(move)
+            eval, _ = minimax_with_timeout(board, depth - 1, alpha, beta, False, start_time, time_limit)
+            board.pop()
+            if eval > curr_max:
+                curr_max = eval
+                best_move = move
+            alpha = max(alpha, eval)
+            if beta <= alpha:
+                break
+        transposition_table[key] = (depth, curr_max, best_move)
+        return curr_max, best_move
+    else:
+        curr_min = float('inf')
+        best_move = None
+        for move in order_moves(board):
+            board.push(move)
+            eval, _ = minimax_with_timeout(board, depth - 1, alpha, beta, True, start_time, time_limit)
+            board.pop()
+            if eval < curr_min:
+                curr_min = eval
+                best_move = move
+            beta = min(beta, eval)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+            if beta <= alpha:
+                break
+        transposition_table[key] = (depth, curr_min, best_move)
+        return curr_min, best_move
+    
+# Iteratively deepen until time runs out and returns the best move found 
+def find_best_move(board, time_limit=5.0, max_depth=20):
+    start_time = time.time()
+    best_move = None
+    best_score = 0
+
+    for depth in range(1, max_depth + 1):
+        try:
+            score, move = minimax_with_timeout(
+                board, depth, float('-inf'), float('-inf'), 
+                board.turn == chess.WHITE, 
+                start_time, time_limit
+            )
+
+            best_move = move
+            best_score = score
+            elapsed = time.time() - start_time
+            print(f"  depth {depth}: best={move}, score={score}, time={elapsed:.2f}s")
+            
+            # If over half time budget, don't start a new depth
+            if elapsed > time_limit / 2:
+                break
+        except TimeoutError:
+            # Ran out of time mid-search — keep the previous depth's result
+            print(f"  depth {depth}: timed out, using depth {depth-1} result")
+            break
+    return best_move
+
+
 # Returns the best score along with the best move
 def minimax(board, depth, alpha, beta, maximisingPlayer):
     if board.is_game_over():
@@ -70,12 +137,21 @@ def minimax(board, depth, alpha, beta, maximisingPlayer):
     if depth == 0:
         return quiescence(board, alpha, beta, maximisingPlayer), None
     
+    # Hashes board position into single 64-bit integer
+    key = chess.polyglot.zobrist_hash(board)
+    if key in transposition_table:
+        cached_depth, cached_score, cached_move = transposition_table[key]
+
+        # Checks if current depth is greater than prev depth (we trust this more so return it)
+        if cached_depth >= depth:
+            return cached_score, cached_move
+    
     # White is maximising player
     if maximisingPlayer:
         curr_max = float('-inf')
         best_move = None
 
-        for move in board.legal_moves:
+        for move in order_moves(board):
             board.push(move)
             eval, _ = minimax(board, depth - 1, alpha, beta, False)
             board.pop()
@@ -87,14 +163,15 @@ def minimax(board, depth, alpha, beta, maximisingPlayer):
             alpha = max(alpha, eval)
             if beta <= alpha:
                 break
-
+        
+        transposition_table[key] = (depth, curr_max, best_move)
         return curr_max, best_move
 
     else:
         curr_min = float('inf')
         best_move = None
 
-        for move in board.legal_moves:
+        for move in order_moves(board):
             board.push(move)
             eval, _ = minimax(board, depth - 1, alpha, beta, True)
             board.pop()
@@ -107,7 +184,26 @@ def minimax(board, depth, alpha, beta, maximisingPlayer):
             if beta <= alpha:
                 break
 
+        transposition_table[key] = (depth, curr_min, best_move)
         return curr_min, best_move
+
+# Takes board position and returns legal moves sorted by how promising each look
+def order_moves(board):
+    def move_score(move):
+        if board.is_capture(move):
+            victim = board.piece_at(move.to_square)
+            attacker = board.piece_at(move.from_square)
+            
+            # Edge case: En passant
+            if victim is None:
+                return 100
+            victim_value = helpers.PIECE_VALUES[victim.piece_type]
+            attacker_value = helpers.PIECE_VALUES[attacker.piece_type]
+
+            # Ranking heuristic: Most valuable victim, least valuable attacker
+            return 10 * victim_value - attacker_value
+        return 0
+    return sorted(board.legal_moves, key=move_score, reverse=True)
 
 def playAI():
     board = game.chess.Board()

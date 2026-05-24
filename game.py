@@ -7,6 +7,7 @@ import numpy as np
 import multiprocessing as mp
 import tensorflow
 import os
+import helpers
 
 from io import StringIO
 from sklearn.model_selection import train_test_split
@@ -46,7 +47,7 @@ def extract_game_info(game, outcome):
 
 def get_stockfish_eval(board):
     engine = get_engine()
-    analysis = engine.analyse(board, chess.engine.Limit(depth=10))
+    analysis = engine.analyse(board, chess.engine.Limit(depth=6))
     return analysis["score"].relative.score(mate_score=5000)
 
 def process_row(lines, result):
@@ -54,7 +55,8 @@ def process_row(lines, result):
     return extract_game_info(game, result)
 
 def process_data():
-    df = pd.read_csv("game_data.csv", nrows=100, usecols=["lines", "result"], dtype={"lines": "str", "result": "category"})
+    df = pd.read_csv("game_data.csv", nrows=5000, usecols=["lines", "result"], dtype={"lines": "str", "result": "category"})
+    df = df.dropna(subset=["lines"])
     print("Data loaded successfully")
 
     with mp.Pool(mp.cpu_count()) as pool:
@@ -66,68 +68,93 @@ def process_data():
     all_positions, all_evaluations, all_results = map(np.concatenate, zip(*results))
     return all_positions, all_evaluations, all_results
 
-# Each feature vector is consisted of the following:
-#   - Number of pieces remaining
-#   - Material balance (difference in piece value of white and black)
-#   - Mobility (number of legal moves available)
-#   - Board control (number of pieces which control the squares d4, e4, d5, e5)
-#   - White King safety (1 if castled, 0 if not)
-#   - Black King safety 
+# Creating 29 features in total for model to learn
 def extract_features(position):
     board = chess.Board(position)
     features = []
-
-    # Number of pieces remaining
-    features.append(len(board.piece_map().items()))
-
-    # Material balance (difference in piece value of white and black)
-    features.append(helpers.get_material_balance(board))
-
-    # Mobility (number of legal moves available)
-    features.append(len(list(move for move in board.legal_moves)))
-
-    # Board control (number of pieces which control the squares d4, e4, d5, e5)
+    
+    # Material features (one per piece type per colour) 
+    for color in [chess.WHITE, chess.BLACK]:
+        for piece_type in [chess.PAWN, chess.KNIGHT, chess.BISHOP, 
+                           chess.ROOK, chess.QUEEN]:
+            features.append(len(board.pieces(piece_type, color)))
+    
+    # Piece-square table contribution (one per piece type per colour)
+    for color in [chess.WHITE, chess.BLACK]:
+        for piece_type in [chess.PAWN, chess.KNIGHT, chess.BISHOP, 
+                           chess.ROOK, chess.QUEEN, chess.KING]:
+            total = 0
+            for square in board.pieces(piece_type, color):
+                if color == chess.WHITE:
+                    total += helpers.PIECE_TABLES[piece_type][square]
+                else:
+                    total += helpers.PIECE_TABLES[piece_type][chess.square_mirror(square)]
+            features.append(total)
+    
+    # Mobility 
+    features.append(len(list(board.legal_moves)))
+    
+    # Mobility for the other side
+    board.push(chess.Move.null())  
+    features.append(len(list(board.legal_moves)))
+    board.pop()
+    
+    # King safety
+    features.append(int(board.has_castling_rights(chess.WHITE)))
+    features.append(int(board.has_castling_rights(chess.BLACK)))
+    features.append(int(board.is_check()))
+    
+    # Centre control
     features.append(helpers.get_board_control(board))
-
-    # King safety (1 if castled, 0 if not)
-    features.append(helpers.get_king_safety(board))
-
+    
+    # Whose turn
+    features.append(1 if board.turn == chess.WHITE else 0)
+    
     return features
 
 def train_evaluations():
     all_positions, all_evaluations, all_results = process_data()
 
-    x = np.array([extract_features(position) for position in all_positions])
-    y = np.array(all_evaluations)
+    x = np.array([extract_features(position) for position in all_positions], dtype=np.float32)
+    y = np.array(all_evaluations, dtype=np.float32)
 
-    # Split the data into training and testing sets
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, random_state=42)
+    # Normalise inputs
+    x_mean = x.mean(axis=0)
+    x_std = x.std(axis=0) + 1e-8  # avoid divide-by-zero
+    x = (x - x_mean) / x_std
     
-    # Creating a sequential NN
+    # Save the normalisation params so ai.py can use them
+    np.save("feature_mean.npy", x_mean)
+    np.save("feature_std.npy", x_std)
+    
+    # Clip y to avoid the NN obsessing over rare mate scores
+    y = np.clip(y, -2000, 2000)
+
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
+    
     model = Sequential([
-        Dense(64, activation='relu', input_shape=(x_train.shape[1],)),
-        Dropout(0.3),
-        Dense(32, activation='relu'), 
-        Dropout(0.3),
-        Dense(16, activation='relu'),  
-        Dense(1) 
+        Dense(128, activation='relu', input_shape=(x_train.shape[1],)),
+        Dropout(0.2),
+        Dense(64, activation='relu'),
+        Dropout(0.2),
+        Dense(32, activation='relu'),
+        Dense(1)
     ])
 
-    # Compiling model
-    model.compile(optimizer='adam', loss="mean_squared_error",
-                  metrics=["accuracy"])
+    # Use MAE as a metric (interpretable in centipawns)
+    model.compile(optimizer='adam', loss="mean_squared_error", metrics=["mae"])
+    
+    model.fit(x_train, y_train, epochs=50, batch_size=256, 
+              validation_split=0.1, verbose=1)
 
-    # Training model
-    model.fit(x_train, y_train, epochs=30)
+    mse, mae = model.evaluate(x_test, y_test)
+    print(f"Test MSE: {mse:.1f}")
+    print(f"Test MAE: {mae:.1f} centipawns")  # ← this is what you care about
 
-    # Evaluating model using MSE
-    mse = model.evaluate(x_test, y_test)
-    print(f"Mean Squared Error: {mse}")
-    model.save("chess_evaluation_model.h5")
+    model.save("chess_evaluation_model.keras")  # new format, no h5 warning
 
-    # Quitting stockfish
     if _engine is not None:
         _engine.quit()
-
+        
 if __name__ == "__main__":
     train_evaluations()

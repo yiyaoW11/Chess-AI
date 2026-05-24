@@ -32,7 +32,7 @@ After improving the training pipeline, the NN's evaluation error dropped ~3.5× 
 
 ## Project history
 
-Started in January 2025 as a first deep learning project, motivated by curiosity about how game-playing AIs actually work (and wanting to beat my brother at chess). The initial version was unusable — moves took minutes due to inefficient code structure (a 13MB CSV loading on every import, `model.predict()` called hundreds of times per search with massive Python overhead) and the NN was undertrained (100 games, 5 features, MAE of 290 centipawns).
+Started as a first deep learning project, motivated by curiosity about how game-playing AIs actually work (and wanting to beat my brother at chess). The initial version was unusable — moves took minutes due to inefficient code structure (a 13MB CSV loading on every import, `model.predict()` called hundreds of times per search with massive Python overhead) and the NN was undertrained (100 games, 5 features, MAE of 290 centipawns).
 
 Returned to the project in May 2026 with more programming experience and rebuilt it properly:
 - Profiled and fixed the bottlenecks → moves now take seconds, not minutes

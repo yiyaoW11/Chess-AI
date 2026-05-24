@@ -29,4 +29,6 @@ def evaluate_board_with_nn(board):
     features = features.reshape(1, -1)
     
     score = _fast_predict(features).numpy()[0][0]
+
+    
     return float(score)

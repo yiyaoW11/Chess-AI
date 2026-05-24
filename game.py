@@ -48,7 +48,7 @@ def extract_game_info(game, outcome):
 def get_stockfish_eval(board):
     engine = get_engine()
     analysis = engine.analyse(board, chess.engine.Limit(depth=6))
-    return analysis["score"].relative.score(mate_score=5000)
+    return analysis["score"].white().score(mate_score=5000)
 
 def process_row(lines, result):
     game = create_pgn_game(lines)
@@ -155,6 +155,6 @@ def train_evaluations():
 
     if _engine is not None:
         _engine.quit()
-        
+
 if __name__ == "__main__":
     train_evaluations()

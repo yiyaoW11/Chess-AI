@@ -6,24 +6,36 @@ import nn_eval
 import ai
 
 def play_one_game(white_eval_fn, black_eval_fn, time_per_move=1.0):
-    """Play a full game. Each side uses their own evaluation function."""
     board = chess.Board()
     while not board.is_game_over() and board.fullmove_number < 150:
         ai.transposition_table.clear()
-        
-        # Monkey-patch the eval function based on whose turn it is
-        if board.turn == chess.WHITE:
-            ai.evaluate_board_with_classical = white_eval_fn
-        else:
-            ai.evaluate_board_with_classical = black_eval_fn
-        
-        move = ai.find_best_move(board, time_limit=time_per_move)
+        eval_fn = white_eval_fn if board.turn == chess.WHITE else black_eval_fn
+        move = ai.find_best_move(board, time_limit=time_per_move, eval_fn=eval_fn)
         if move is None:
             break
         board.push(move)
+    return board.result()
+
+
+# def play_one_game(white_eval_fn, black_eval_fn, time_per_move=1.0):
+#     """Play a full game. Each side uses their own evaluation function."""
+#     board = chess.Board()
+#     while not board.is_game_over() and board.fullmove_number < 150:
+#         ai.transposition_table.clear()
+        
+#         # Monkey-patch the eval function based on whose turn it is
+#         if board.turn == chess.WHITE:
+#             ai.evaluate_board_with_classical = white_eval_fn
+#         else:
+#             ai.evaluate_board_with_classical = black_eval_fn
+        
+#         move = ai.find_best_move(board, time_limit=time_per_move)
+#         if move is None:
+#             break
+#         board.push(move)
     
-    result = board.result()
-    return result
+#     result = board.result()
+#     return result
 
 def tournament(n_games=20, time_per_move=1.0):
     classical = helpers.evaluate_board_classical
